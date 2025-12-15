@@ -5,7 +5,6 @@ from scipy.optimize import curve_fit
 from sklearn.metrics import mean_squared_error, r2_score
 import matplotlib.ticker as ticker
 from pathlib import Path
-
 # ---------------------- plotting style ----------------------
 matplotlib.rcParams.update({
     "font.family": "Arial",
@@ -14,9 +13,8 @@ matplotlib.rcParams.update({
     "legend.fontsize": 16,
     "xtick.labelsize": 18,
     "ytick.labelsize": 18,
-    "text.usetex": False,     
+    "text.usetex": False,    
 })
-
 # ---------------------- isotherm models ----------------------
 def langmuir(P, Qm, b):
     """Langmuir: single-site adsorption."""
@@ -24,14 +22,12 @@ def langmuir(P, Qm, b):
 
 def sips(P, Qm, b, n):
     """Sips (Langmuir–Freundlich)."""
-    return (Qm * b * P ** n) / (1.0 + b * P ** n)
-
+    return (Qm * (b * P) ** n) / (1.0 + (b * P) ** n)
 # ---------------------- fitting + plot helper ----------------------
 def fit_and_plot(data, label, color, marker, ax,
-                 show_residuals=False):
+                 show_residuals=False, log_lines=None):
     """Fit Langmuir & Sips to one T-series and plot."""
     P, V = data[:, 0], data[:, 1]
-
     # ---------- Langmuir ----------
     p0_L  = [V.max(), 0.1]                     # [Qm, b]
     bndsL = ([0, 1e-6], [np.inf, np.inf])
@@ -39,7 +35,6 @@ def fit_and_plot(data, label, color, marker, ax,
         langmuir, P, V, p0=p0_L, bounds=bndsL,
         method="trf", max_nfev=5000
     )
-
     # ---------- Sips ----------
     p0_S  = [V.max(), 0.1, 1.0]                # [Qm, b, n]
     bndsS = ([0, 1e-6, 0.1], [np.inf, np.inf, 5.0])
@@ -47,7 +42,7 @@ def fit_and_plot(data, label, color, marker, ax,
         sips, P, V, p0=p0_S, bounds=bndsS,
         method="trf", max_nfev=100000000
     )
-
+                     
     # Predictions
     V_L = langmuir(P, *params_L)
     V_S = sips(P, *params_S)
@@ -62,7 +57,7 @@ def fit_and_plot(data, label, color, marker, ax,
     ax.plot(P_fit, sips(P_fit, *params_S),
             ls="--", color="red",   lw=1.8, label=None)
 
-    # ---------------- metrics summary ----------------
+    # ---------------- metrics ----------------
     metrics = {
         "Langmuir": {
             "Qm": params_L[0], "b": params_L[1],
@@ -75,12 +70,22 @@ def fit_and_plot(data, label, color, marker, ax,
             "RMSE": np.sqrt(mean_squared_error(V, V_S))
         }
     }
-    print(f"\n=== {label} ===")
+
+    header = f"\n=== {label} ==="
+    print(header)
+    if log_lines is not None:
+        log_lines.append(header)
+
     for model, vals in metrics.items():
-        params_str = ", ".join(f"{k}={v:.4g}" for k, v in vals.items()
-                               if k not in ("R2", "RMSE"))
-        print(f"{model:8s}: {params_str:<30s}"
-              f"  R²={vals['R2']:.4f}  RMSE={vals['RMSE']:.4f}")
+        params_str = ", ".join(
+            f"{k}={v:.4g}" for k, v in vals.items()
+            if k not in ("R2", "RMSE")
+        )
+        line = (f"{model:8s}: {params_str:<30s}"
+                f"  R²={vals['R2']:.4f}  RMSE={vals['RMSE']:.4f}")
+        print(line)
+        if log_lines is not None:
+            log_lines.append(line)
 
     # ------------- optional residual plot -------------
     if show_residuals:
@@ -94,7 +99,7 @@ def fit_and_plot(data, label, color, marker, ax,
 
 # ---------------------- main script ----------------------
 def main():
-    for fname in ("data.dat", "data2.dat", "data3.dat"):
+    for fname in ("data.dat", "data2.dat"):
         if not Path(fname).is_file():
             raise FileNotFoundError(f"Missing {fname!r}")
 
@@ -102,14 +107,17 @@ def main():
     data_323K = np.loadtxt("data2.dat")
     data_348K = np.loadtxt("data3.dat")
 
+    # List to collect all printed lines for export
+    log_lines = []
+
     fig, ax = plt.subplots(figsize=(6, 8))
     ax.plot([], [], ls="--", color="blue",  label="Langmuir fit")
     ax.plot([], [], ls="--", color="red",   label="Sips fit")
 
     # Fit & plot each temperature
-    fit_and_plot(data_298K, "298 K", "black", "o", ax)
-    fit_and_plot(data_323K, "323 K", "green", "D", ax)
-    fit_and_plot(data_348K, "348 K", "brown", "s", ax)
+    fit_and_plot(data_298K, "298 K", "black", "o", ax, log_lines=log_lines)
+    fit_and_plot(data_323K, "323 K", "green", "D", ax, log_lines=log_lines)
+    fit_and_plot(data_348K, "348 K", "blue", "s", ax, log_lines=log_lines)
 
     ax.set_xlabel("Pressure (bar)")
     ax.set_ylabel("Quantity adsorbed (mmol g⁻¹)")
@@ -126,6 +134,17 @@ def main():
 
     ax.legend(loc="best")
     plt.tight_layout()
+
+    # ------------------- EXPORTS -------------------
+    # 1) Save the plot image in current working directory
+    fig.savefig("isotherm_fits.png", dpi=300, bbox_inches="tight")
+
+    # 2) Save the printed summary to a .dat file in current working directory
+    #    (does not overwrite input data files)
+    output_file = Path("fit_results.dat")
+    with output_file.open("w", encoding="utf-8") as f:
+        f.write("\n".join(log_lines) + "\n")
+
     plt.show()
 
 if __name__ == "__main__":
